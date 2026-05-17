@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useEffect, useMemo, useRef } from "react";
+import { memo, useState, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { IconRefresh, IconExternalLink } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -10,6 +10,21 @@ import { detectPreviewUrlFromOutput, rewritePreviewUrlForProxy } from "@/lib/pre
 import { InspectButton } from "./inspector/inspect-button";
 import { AnnotationsPanel } from "./inspector/annotations-panel";
 import { useInspectMode } from "@/hooks/use-inspect-mode";
+import { usePreviewConsoleForwarder } from "@/hooks/use-preview-console-forwarder";
+import { PortForwardButton } from "./port-forward-dialog";
+
+// The Browser iframe loads dev-server URLs like `http://localhost:3000`, which
+// only resolves to the workspace when the user is on the same host as kandev.
+// When kandev is accessed remotely (e.g. via Tailscale), `localhost` in the
+// iframe points at the *user's* machine and the preview fails — port-forwarding
+// (proxy or tunnel) is what makes the workspace's dev server reachable.
+const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
+const NO_SUBSCRIBE = () => () => {};
+const GET_FRONTEND_REMOTE = () => !LOCAL_HOSTNAMES.has(window.location.hostname);
+const GET_FRONTEND_REMOTE_SSR = () => false;
+function useIsFrontendRemote(): boolean {
+  return useSyncExternalStore(NO_SUBSCRIBE, GET_FRONTEND_REMOTE, GET_FRONTEND_REMOTE_SSR);
+}
 
 function BrowserPanelContent({
   showIframeDelayed,
@@ -129,10 +144,19 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
 export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const inspect = useInspectMode(iframeRef);
+  usePreviewConsoleForwarder();
   // Inspect mode = "load this page through the proxy so the inspector script
   // can be injected". Toggling Inspect remounts the iframe with a different src.
   const url = useBrowserPanelUrl((params.url as string) || "", inspect.isInspectMode);
   const showInspect = url.canProxy;
+
+  const isFrontendRemote = useIsFrontendRemote();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const isAgentctlReady = useAppStore((state) =>
+    activeSessionId
+      ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready"
+      : false,
+  );
 
   return (
     <PanelRoot>
@@ -175,6 +199,9 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
             count={inspect.annotations.length}
             onToggle={inspect.toggleInspect}
           />
+        )}
+        {isFrontendRemote && (
+          <PortForwardButton sessionId={activeSessionId} isAgentctlReady={isAgentctlReady} />
         )}
       </PanelHeaderBar>
 

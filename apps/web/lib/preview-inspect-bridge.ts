@@ -69,10 +69,23 @@ interface InspectorReadyMessage {
   payload: Record<string, never>;
 }
 
+export type PreviewConsoleLevel = "log" | "warn" | "error" | "info" | "debug";
+
+interface PreviewConsoleMessage {
+  source: typeof INSPECTOR_SOURCE;
+  type: "console";
+  payload: { level: PreviewConsoleLevel; args: unknown[] };
+}
+
 export type InspectorMessage =
   | AnnotationAddedMessage
   | InspectExitedMessage
-  | InspectorReadyMessage;
+  | InspectorReadyMessage
+  | PreviewConsoleMessage;
+
+export function isPreviewConsoleMessage(msg: InspectorMessage): msg is PreviewConsoleMessage {
+  return msg.type === "console";
+}
 
 export function isInspectorMessage(data: unknown): data is InspectorMessage {
   if (typeof data !== "object" || data === null) return false;

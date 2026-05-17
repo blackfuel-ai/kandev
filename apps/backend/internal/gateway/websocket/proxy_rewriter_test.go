@@ -176,6 +176,91 @@ func TestRewriteHTMLURLs_NoHeadStillRewritesURLs(t *testing.T) {
 	}
 }
 
+func TestRewriteHTMLURLs_PreservesScriptContentVerbatim(t *testing.T) {
+	// Inline scripts must not be HTML-escaped — `&`, `<`, `>` are valid JS
+	// tokens (bitwise/logical operators, comparisons, JSON characters in
+	// embedded payloads, etc.) and escaping them corrupts the JS.
+	in := `<!DOCTYPE html><html><head></head><body>` +
+		`<script>var a = 1 & 2; var b = a && true; var c = "<x>"; var d = {"k":"&"};</script>` +
+		`<script src="/static/app.js"></script>` +
+		`</body></html>`
+
+	got := string(rewriteHTMLURLs([]byte(in), proxyPrefix))
+
+	// Inline script body must come through unescaped.
+	for _, needle := range []string{
+		`var a = 1 & 2;`,
+		`var b = a && true;`,
+		`var c = "<x>";`,
+		`var d = {"k":"&"};`,
+	} {
+		mustContain(t, got, needle)
+	}
+
+	// External script `src` is still rewritten.
+	mustContain(t, got, `src="/port-proxy/abc/3001/static/app.js"`)
+
+	// Sanity: none of the inline-script characters got HTML-escaped.
+	for _, forbidden := range []string{`&amp;`, `&lt;x&gt;`} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("script body was HTML-escaped (%q present):\n%s", forbidden, got)
+		}
+	}
+}
+
+func TestRuntimeShim_InstallsMutationObserver(t *testing.T) {
+	shim := runtimeShim(proxyPrefix)
+
+	// MutationObserver is installed so dynamically-inserted DOM nodes (e.g.
+	// Next.js `ReactDOM.preload()` for fonts) get their URL attributes
+	// rewritten too, not just whatever was in the initial HTML.
+	mustContain(t, shim, `new MO(function(rs)`)
+	mustContain(t, shim, `.observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:ATTRS})`)
+
+	// The attribute list mirrors the static HTML rewriter's coverage so the
+	// runtime path doesn't silently miss attributes the static path catches.
+	mustContain(t, shim, `'href','src','action','formaction','cite','data','poster','background','manifest','srcset'`)
+
+	// srcset has its own splitter (whitespace-separated descriptors).
+	mustContain(t, shim, `if(a==='srcset')`)
+}
+
+func TestRuntimeShim_ForwardsConsoleToParent(t *testing.T) {
+	shim := runtimeShim(proxyPrefix)
+
+	// Console levels are intercepted so iframe diagnostics surface in the
+	// parent window's console alongside other preview events.
+	mustContain(t, shim, `var LV=['log','warn','error','info','debug'];`)
+	mustContain(t, shim, `window.parent.postMessage({source:'kandev-inspector',type:'console',payload:{level:lv,args:out}}`)
+
+	// Original method is still invoked so the iframe's own DevTools shows
+	// the same output.
+	mustContain(t, shim, `return orig.apply(console,arguments)`)
+}
+
+func TestRuntimeShim_PatchesNavigationAPIs(t *testing.T) {
+	shim := runtimeShim(proxyPrefix)
+
+	// Patches history.pushState and history.replaceState so SPA routers keep
+	// the proxy prefix in the URL bar on client-side navigation.
+	mustContain(t, shim, `'pushState','replaceState'`)
+	mustContain(t, shim, `history[op]=function(s,t,u)`)
+
+	// Patches location.assign and location.replace so imperative navigation
+	// goes through the same rewriter.
+	mustContain(t, shim, `'assign','replace'`)
+	mustContain(t, shim, `location[op]=function(u)`)
+
+	// Both patches must reuse the existing path rewriter `r()` rather than
+	// rolling their own prefix logic.
+	for _, needle := range []string{
+		`u=r(u);return orig.call(this,s,t,u)`, // history APIs
+		`u=r(u);return orig.call(location,u)`, // location APIs
+	} {
+		mustContain(t, shim, needle)
+	}
+}
+
 func TestRewriteSrcSet(t *testing.T) {
 	in := "/a.png 1x, /b.png 2x, //cdn.example.com/c.png 3x"
 	got := rewriteSrcSet(in, proxyPrefix)
