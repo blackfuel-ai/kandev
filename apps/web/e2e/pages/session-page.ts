@@ -32,6 +32,13 @@ export class SessionPage {
   get portForwardButton() {
     return this.page.getByTestId("port-forward-button");
   }
+  /** Open a Browser panel via the dockview "+" menu. The port-forward button
+   *  lives inside the Browser panel header, so any test that interacts with
+   *  it needs the panel mounted first. */
+  async openBrowserPanel() {
+    await this.page.getByTestId("dockview-add-panel-btn").first().click();
+    await this.page.getByTestId("add-browser-panel").click();
+  }
   get portForwardDialog() {
     return this.page.getByTestId("port-forward-dialog");
   }

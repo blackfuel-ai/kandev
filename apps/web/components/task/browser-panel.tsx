@@ -159,11 +159,23 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
 
   const isFrontendRemote = useIsFrontendRemote();
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  // Show Port Forwarding when EITHER the kandev frontend is being accessed
+  // remotely (Tailscale, LAN — `localhost` in the iframe can't reach the
+  // workspace) OR the workspace executor is itself a remote one (Docker /
+  // Sprites / remote VM — the workspace runs off-host even if the user is
+  // local). Either case means the iframe's `localhost:port` won't resolve
+  // and the user needs the proxy / tunnel to reach their dev server.
+  const isRemoteExecutor = useAppStore((state) => {
+    const id = state.tasks.activeTaskId;
+    if (!id) return false;
+    return state.kanban.tasks.find((t) => t.id === id)?.isRemoteExecutor ?? false;
+  });
   const isAgentctlReady = useAppStore((state) =>
     activeSessionId
       ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready"
       : false,
   );
+  const showPortForward = isFrontendRemote || isRemoteExecutor;
 
   return (
     <PanelRoot>
@@ -207,7 +219,7 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
             onToggle={inspect.toggleInspect}
           />
         )}
-        {isFrontendRemote && (
+        {showPortForward && (
           <PortForwardButton sessionId={activeSessionId} isAgentctlReady={isAgentctlReady} />
         )}
       </PanelHeaderBar>
