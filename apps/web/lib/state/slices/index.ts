@@ -13,6 +13,7 @@ export { createJiraSlice, defaultJiraState } from "./jira/jira-slice";
 export { createLinearSlice, defaultLinearState } from "./linear/linear-slice";
 export { createOfficeSlice, defaultOfficeState } from "./office/office-slice";
 export { createFeaturesSlice, defaultFeaturesState } from "./features/features-slice";
+export { createSystemSlice, defaultSystemState } from "./system/system-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -46,6 +47,14 @@ export type {
   FeatureFlags,
   FeatureName,
 } from "./features/types";
+export type {
+  SystemSlice,
+  SystemSliceState,
+  SystemSliceActions,
+  SystemBackupsState,
+  SystemLogsState,
+  SystemJobsMap,
+} from "./system/types";
 
 // Re-export commonly used types from each domain
 export type {

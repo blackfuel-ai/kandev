@@ -35,6 +35,7 @@ import {
   createLinearSlice,
   createOfficeSlice,
   createFeaturesSlice,
+  createSystemSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -46,6 +47,7 @@ import {
   defaultLinearState,
   defaultOfficeState,
   defaultFeaturesState,
+  defaultSystemState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -195,6 +197,24 @@ export type AppState = {
   // Feature flags slice
   features: (typeof defaultFeaturesState)["features"];
   setFeatures: (features: (typeof defaultFeaturesState)["features"]) => void;
+
+  // System slice
+  system: (typeof defaultSystemState)["system"];
+  setSystemInfo: (info: NonNullable<(typeof defaultSystemState)["system"]["info"]>) => void;
+  setSystemDiskUsage: (
+    usage: NonNullable<(typeof defaultSystemState)["system"]["diskUsage"]>,
+  ) => void;
+  setSystemDatabase: (
+    stats: NonNullable<(typeof defaultSystemState)["system"]["database"]>,
+  ) => void;
+  setSystemBackups: (items: (typeof defaultSystemState)["system"]["backups"]["items"]) => void;
+  setSystemLogs: (files: (typeof defaultSystemState)["system"]["logs"]["files"]) => void;
+  setSystemLogTail: (lines: string[]) => void;
+  setSystemUpdates: (
+    updates: NonNullable<(typeof defaultSystemState)["system"]["updates"]>,
+  ) => void;
+  upsertSystemJob: (job: (typeof defaultSystemState)["system"]["jobs"][string]) => void;
+  clearSystemJob: (jobId: string) => void;
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -554,6 +574,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createFeaturesSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createSystemSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // Override state with merged initial state
       kanban: merged.kanban,
@@ -609,6 +631,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       linearIssueWatches: merged.linearIssueWatches,
       office: merged.office,
       features: merged.features,
+      system: merged.system,
       previewPanel: merged.previewPanel,
       rightPanel: merged.rightPanel,
       diffs: merged.diffs,
