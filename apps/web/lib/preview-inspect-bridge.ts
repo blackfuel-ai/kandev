@@ -70,6 +70,13 @@ interface InspectorReadyMessage {
 }
 
 export type PreviewConsoleLevel = "log" | "warn" | "error" | "info" | "debug";
+const PREVIEW_CONSOLE_LEVELS: ReadonlySet<string> = new Set([
+  "log",
+  "warn",
+  "error",
+  "info",
+  "debug",
+]);
 
 interface PreviewConsoleMessage {
   source: typeof INSPECTOR_SOURCE;
@@ -83,8 +90,16 @@ export type InspectorMessage =
   | InspectorReadyMessage
   | PreviewConsoleMessage;
 
+// Narrows past the union — and validates that `level` is one we handle and
+// `args` is an array. Without the Array.isArray check, a malformed payload
+// with non-iterable `args` would throw inside the consumer's `...args` spread
+// and kill the message listener for the rest of the session.
 export function isPreviewConsoleMessage(msg: InspectorMessage): msg is PreviewConsoleMessage {
-  return msg.type === "console";
+  if (msg.type !== "console") return false;
+  const p = msg.payload as { level?: unknown; args?: unknown };
+  return (
+    typeof p.level === "string" && PREVIEW_CONSOLE_LEVELS.has(p.level) && Array.isArray(p.args)
+  );
 }
 
 export function isInspectorMessage(data: unknown): data is InspectorMessage {

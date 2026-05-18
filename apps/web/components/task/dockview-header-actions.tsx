@@ -354,8 +354,6 @@ function TerminalScriptsDropdown({
     [environmentId, addTerminalPanel, rightBottomGroupId],
   );
 
-  if (scripts.length === 0) return null;
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

@@ -155,11 +155,67 @@ func rewriteAbsolutePath(rawURL, prefix string) string {
 	return prefix + rawURL
 }
 
+// htmlRewriteState tracks per-document position during a single
+// `rewriteHTMLURLs` pass. Pulled out to its own type so each token-handling
+// case stays short and the top-level loop's cyclomatic complexity stays under
+// the lint budget.
+type htmlRewriteState struct {
+	out          *bytes.Buffer
+	prefix       string
+	shim         string
+	inStyle      bool
+	inScript     bool
+	shimInjected bool
+}
+
+// onStartTag emits the (URL-rewritten) start tag and updates raw-text
+// element tracking. Also injects the runtime shim immediately after `<head>`.
+func (s *htmlRewriteState) onStartTag(token html.Token) {
+	rewriteTokenURLs(&token, s.prefix)
+	s.out.WriteString(token.String())
+	if !s.shimInjected && token.Data == headTagName {
+		s.out.WriteString(s.shim)
+		s.shimInjected = true
+	}
+	switch token.Data {
+	case styleTagName:
+		s.inStyle = true
+	case scriptTagName:
+		s.inScript = true
+	}
+}
+
+// onEndTag clears raw-text element tracking, then writes the end tag.
+func (s *htmlRewriteState) onEndTag(token html.Token) {
+	switch token.Data {
+	case styleTagName:
+		s.inStyle = false
+	case scriptTagName:
+		s.inScript = false
+	}
+	s.out.WriteString(token.String())
+}
+
+// onTextToken writes text content with the right escaping for the current
+// element context: rewrite CSS URLs inside `<style>`, emit raw bytes inside
+// `<script>` (Token.String would HTML-escape and corrupt JS), and otherwise
+// fall back to the default Token.String() entity-encoding.
+func (s *htmlRewriteState) onTextToken(token html.Token) {
+	switch {
+	case s.inStyle:
+		s.out.WriteString(rewriteCSSFragment(token.Data, s.prefix))
+	case s.inScript:
+		s.out.WriteString(token.Data)
+	default:
+		s.out.WriteString(token.String())
+	}
+}
+
 // rewriteHTMLURLs walks the HTML document and rewrites every rewritable URL
 // attribute (`href`, `src`, …) plus `srcset` values and inline `style="…"`
-// `url(...)` references. `<style>` and `<script>` element contents are left
-// alone (they're handled by `rewriteCSSURLs` and the runtime shim respectively
-// — see phase 4).
+// `url(...)` references. `<style>` content is run through the CSS URL
+// rewriter; `<script>` content is emitted unchanged (the runtime shim
+// handles network-facing APIs at runtime).
 //
 // Falls back to returning the input unchanged if tokenization fails midway, so
 // a malformed page never blocks the response.
@@ -167,16 +223,7 @@ func rewriteHTMLURLs(body []byte, prefix string) []byte {
 	tok := html.NewTokenizer(bytes.NewReader(body))
 	var out bytes.Buffer
 	out.Grow(len(body) + 256 + len(runtimeShimTemplate))
-	shim := runtimeShim(prefix)
-	// Track whether we're inside a `<style>` or `<script>` block. The HTML
-	// tokenizer emits the entire body of these raw-text elements as a single
-	// TextToken, but `Token.String()` would HTML-escape it, which corrupts
-	// inline CSS (`url(...)` quoting) and inline JS (`&` operators, JSON in
-	// flight payloads, etc.). For `<style>` we rewrite CSS URLs via
-	// `rewriteCSSFragment`. For `<script>` we emit the raw `Data` untouched.
-	inStyle := false
-	inScript := false
-	shimInjected := false
+	s := &htmlRewriteState{out: &out, prefix: prefix, shim: runtimeShim(prefix)}
 	for {
 		tt := tok.Next()
 		if tt == html.ErrorToken {
@@ -188,40 +235,14 @@ func rewriteHTMLURLs(body []byte, prefix string) []byte {
 		token := tok.Token()
 		switch token.Type {
 		case html.StartTagToken:
-			rewriteTokenURLs(&token, prefix)
-			out.WriteString(token.String())
-			if !shimInjected && token.Data == headTagName {
-				// Inject right after `<head>` opens so the shim installs before
-				// any other script in the document can execute.
-				out.WriteString(shim)
-				shimInjected = true
-			}
-			switch token.Data {
-			case styleTagName:
-				inStyle = true
-			case scriptTagName:
-				inScript = true
-			}
+			s.onStartTag(token)
 		case html.SelfClosingTagToken:
 			rewriteTokenURLs(&token, prefix)
 			out.WriteString(token.String())
 		case html.EndTagToken:
-			switch token.Data {
-			case styleTagName:
-				inStyle = false
-			case scriptTagName:
-				inScript = false
-			}
-			out.WriteString(token.String())
+			s.onEndTag(token)
 		case html.TextToken:
-			switch {
-			case inStyle:
-				out.WriteString(rewriteCSSFragment(token.Data, prefix))
-			case inScript:
-				out.WriteString(token.Data)
-			default:
-				out.WriteString(token.String())
-			}
+			s.onTextToken(token)
 		default:
 			out.WriteString(token.String())
 		}

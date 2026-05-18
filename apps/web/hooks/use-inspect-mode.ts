@@ -53,6 +53,11 @@ export function useInspectMode(
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
+      // Reject messages from anything other than the previewed iframe.
+      // Without this guard, any frame/extension that can post to the parent
+      // could craft a fake annotation whose `comment` text gets formatted into
+      // the prompt we send to the AI agent — a direct prompt-injection seam.
+      if (event.source !== iframeRef.current?.contentWindow) return;
       if (!isInspectorMessage(event.data)) return;
       if (event.data.type === "annotation-added") {
         const number = nextNumber.current++;

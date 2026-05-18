@@ -98,10 +98,11 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
     return rewritePreviewUrlForProxy(directUrl, activeSessionId);
   }, [directUrl, activeSessionId]);
 
-  // Default to direct. Caller flips `useProxy` to true (via the Inspect toggle)
-  // to route through the agentctl proxy so the inspector script can be injected.
-  // Proxying breaks apps that rely on root-absolute asset URLs until URL
-  // rewriting lands (tracked separately), so we keep it opt-in.
+  // Default to the direct URL so the page renders normally; clicking Inspect
+  // switches to the proxied src so the inspector script can be injected. The
+  // gateway port-proxy rewrites root-absolute asset references and patches the
+  // network-facing browser APIs at runtime, so the proxied page works for SPA
+  // routers and dynamic asset URLs too.
   const iframeSrc = useProxy && proxiedUrl ? proxiedUrl : directUrl;
 
   useEffect(() => {
@@ -144,7 +145,7 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
 export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const inspect = useInspectMode(iframeRef);
-  usePreviewConsoleForwarder();
+  usePreviewConsoleForwarder(iframeRef);
   // Inspect mode = "load this page through the proxy so the inspector script
   // can be injected". Toggling Inspect remounts the iframe with a different src.
   const url = useBrowserPanelUrl((params.url as string) || "", inspect.isInspectMode);
