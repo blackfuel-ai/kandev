@@ -96,7 +96,6 @@ describe("useInspectMode", () => {
   });
 
   it("ignores annotation messages sent from a source other than the iframe", () => {
-    setupIframe();
     const { result } = renderHook(() => useInspectMode(setupIframe().ref));
 
     // Posting `source: window` simulates a sibling frame, an extension, or
