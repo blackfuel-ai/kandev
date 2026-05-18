@@ -105,14 +105,20 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
   // routers and dynamic asset URLs too.
   const iframeSrc = useProxy && proxiedUrl ? proxiedUrl : directUrl;
 
+  // Key the loading-spinner gate to the underlying URL (and the refresh key),
+  // NOT to `iframeSrc`. Toggling Inspect mode flips `iframeSrc` between the
+  // direct URL and the proxied URL even though the user's destination didn't
+  // change; if the effect re-ran on every `iframeSrc` change, the cleanup
+  // would hide the iframe and show the 1.5s spinner on every Inspect toggle.
+  // Browser-level iframe navigation handles direct↔proxy swaps fine.
   useEffect(() => {
-    if (!iframeSrc) return;
+    if (!directUrl) return;
     const showTimer = setTimeout(() => setShowIframe(true), 1500);
     return () => {
       setShowIframe(false);
       clearTimeout(showTimer);
     };
-  }, [iframeSrc, refreshKey]);
+  }, [directUrl, refreshKey]);
 
   const displayDraft = urlDraft || detectedUrl || "";
   const showIframeDelayed: string | false = showIframe ? iframeSrc : false;
