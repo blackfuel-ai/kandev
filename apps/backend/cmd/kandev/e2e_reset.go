@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -42,6 +44,9 @@ func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, l
 		}
 
 		ctx := c.Request.Context()
+		if !waitForE2ETaskCleanup(c, taskSvc, log, "before reset") {
+			return
+		}
 
 		// Wipe routing state so the office-routing-* specs don't leak
 		// degraded health rows / route attempts / parked runs between
@@ -108,6 +113,9 @@ func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, l
 			}
 			deletedTasks++
 		}
+		if !waitForE2ETaskCleanup(c, taskSvc, log, "after task delete") {
+			return
+		}
 
 		deletedWorkflows, err := repo.DeleteWorkflowsByWorkspace(ctx, workspaceID, keepWorkflowIDs)
 		if err != nil {
@@ -121,6 +129,19 @@ func handleE2EReset(repo *sqliterepo.Repository, taskSvc *taskservice.Service, l
 			"deleted_workflows": deletedWorkflows,
 		})
 	}
+}
+
+func waitForE2ETaskCleanup(c *gin.Context, taskSvc *taskservice.Service, log *logger.Logger, phase string) bool {
+	waitCtx, cancel := context.WithTimeout(c.Request.Context(), 70*time.Second)
+	defer cancel()
+	if err := taskSvc.WaitForTaskCleanups(waitCtx); err != nil {
+		log.Error("e2e reset: timed out waiting for task cleanup",
+			zap.String("phase", phase),
+			zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "timed out waiting for task cleanup"})
+		return false
+	}
+	return true
 }
 
 type e2eHiddenWorkflowRequest struct {

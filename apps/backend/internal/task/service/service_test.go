@@ -27,6 +27,43 @@ type MockEventBus struct {
 	closed          bool
 }
 
+type blockingTaskExecutionStopper struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newBlockingTaskExecutionStopper() *blockingTaskExecutionStopper {
+	return &blockingTaskExecutionStopper{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (b *blockingTaskExecutionStopper) StopTask(ctx context.Context, taskID, reason string, force bool) error {
+	return b.wait(ctx)
+}
+
+func (b *blockingTaskExecutionStopper) StopSession(ctx context.Context, sessionID, reason string, force bool) error {
+	return b.wait(ctx)
+}
+
+func (b *blockingTaskExecutionStopper) StopExecution(ctx context.Context, executionID, reason string, force bool) error {
+	return b.wait(ctx)
+}
+
+func (b *blockingTaskExecutionStopper) wait(ctx context.Context) error {
+	b.once.Do(func() {
+		close(b.entered)
+	})
+	select {
+	case <-b.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func NewMockEventBus() *MockEventBus {
 	return &MockEventBus{
 		publishedEvents: make([]*bus.Event, 0),
@@ -436,6 +473,69 @@ func TestService_DeleteTask(t *testing.T) {
 	events := eventBus.GetPublishedEvents()
 	if len(events) != 1 {
 		t.Errorf("expected 1 event, got %d", len(events))
+	}
+}
+
+func TestService_WaitForTaskCleanupsWaitsForAsyncDelete(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:     "session-123",
+		TaskID: "task-123",
+		State:  models.TaskSessionStateRunning,
+	})
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		SessionID:        "session-123",
+		TaskID:           "task-123",
+		ExecutorID:       "local",
+		Status:           "running",
+		AgentExecutionID: "execution-123",
+	}); err != nil {
+		t.Fatalf("failed to create executor running row: %v", err)
+	}
+
+	stopper := newBlockingTaskExecutionStopper()
+	svc.SetExecutionStopper(stopper)
+
+	if err := svc.DeleteTask(ctx, "task-123"); err != nil {
+		t.Fatalf("DeleteTask() error = %v", err)
+	}
+
+	select {
+	case <-stopper.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanup did not start stopping the execution")
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- svc.WaitForTaskCleanups(waitCtx)
+	}()
+
+	select {
+	case err := <-waitDone:
+		t.Fatalf("WaitForTaskCleanups returned before cleanup was released: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(stopper.release)
+	select {
+	case err := <-waitDone:
+		if err != nil {
+			t.Fatalf("WaitForTaskCleanups() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitForTaskCleanups did not return after cleanup was released")
+	}
+
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-123"); err == nil || !isExecutorRunningNotFoundError(err) {
+		t.Fatalf("executor running row should be deleted, got err = %v", err)
 	}
 }
 

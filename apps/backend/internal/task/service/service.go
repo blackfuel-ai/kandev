@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -142,6 +143,9 @@ type Service struct {
 	repoCloneLocation     RepoCloneLocation
 	blockers              BlockerRepository
 	comments              CommentRepository
+	cleanupMu             sync.Mutex
+	cleanupActive         int
+	cleanupDone           chan struct{}
 }
 
 // NewService creates a new task service
