@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -734,122 +733,45 @@ func (s *Service) runAsyncTaskCleanup(
 	isEphemeral bool,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
-	done := s.beginTaskCleanup()
 	go func() {
-		defer done()
+		cleanupStart := time.Now()
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
-		s.runTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup, isEphemeral,
-			stopReason, stopFailMsg, cleanupMsg)
+		if s.executionStopper != nil && len(stopTargets) > 0 {
+			for _, target := range stopTargets {
+				if target.executionID != "" {
+					if err := s.executionStopper.StopExecution(cleanupCtx, target.executionID, stopReason, true); err != nil {
+						s.logger.Warn(stopFailMsg,
+							zap.String("task_id", id),
+							zap.String("session_id", target.sessionID),
+							zap.String("execution_id", target.executionID),
+							zap.Error(err))
+					}
+					continue
+				}
+				if err := s.executionStopper.StopSession(cleanupCtx, target.sessionID, stopReason, true); err != nil {
+					s.logger.Warn(stopFailMsg,
+						zap.String("task_id", id),
+						zap.String("session_id", target.sessionID),
+						zap.Error(err))
+				}
+			}
+		}
+
+		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, envCleanup, isEphemeral)
+
+		if len(cleanupErrors) > 0 {
+			s.logger.Warn(cleanupMsg+" with errors",
+				zap.String("task_id", id),
+				zap.Int("error_count", len(cleanupErrors)),
+				zap.Duration("duration", time.Since(cleanupStart)))
+		} else {
+			s.logger.Info(cleanupMsg,
+				zap.String("task_id", id),
+				zap.Duration("duration", time.Since(cleanupStart)))
+		}
 	}()
-}
-
-// WaitForTaskCleanups blocks until task resource cleanup goroutines that were
-// already started have drained. It is intended for test-only reset paths that
-// need deterministic isolation between specs.
-func (s *Service) WaitForTaskCleanups(ctx context.Context) error {
-	for {
-		done := s.currentTaskCleanupDone()
-		if done == nil {
-			return nil
-		}
-		select {
-		case <-done:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
-func (s *Service) beginTaskCleanup() func() {
-	s.cleanupMu.Lock()
-	if s.cleanupActive == 0 {
-		s.cleanupDone = make(chan struct{})
-	}
-	s.cleanupActive++
-	s.cleanupMu.Unlock()
-
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			s.cleanupMu.Lock()
-			defer s.cleanupMu.Unlock()
-			if s.cleanupActive == 0 {
-				return
-			}
-			s.cleanupActive--
-			if s.cleanupActive == 0 && s.cleanupDone != nil {
-				close(s.cleanupDone)
-				s.cleanupDone = nil
-			}
-		})
-	}
-}
-
-func (s *Service) currentTaskCleanupDone() <-chan struct{} {
-	s.cleanupMu.Lock()
-	defer s.cleanupMu.Unlock()
-	if s.cleanupActive == 0 {
-		return nil
-	}
-	return s.cleanupDone
-}
-
-func (s *Service) runTaskCleanup(
-	ctx context.Context,
-	id string,
-	sessions []*models.TaskSession,
-	worktrees []*worktree.Worktree,
-	stopTargets []taskStopTarget,
-	envCleanup taskEnvironmentCleanup,
-	isEphemeral bool,
-	stopReason, stopFailMsg, cleanupMsg string,
-) {
-	cleanupStart := time.Now()
-
-	if s.executionStopper != nil && len(stopTargets) > 0 {
-		s.stopTaskCleanupTargets(ctx, id, stopTargets, stopReason, stopFailMsg)
-	}
-
-	cleanupErrors := s.performTaskCleanup(ctx, id, sessions, worktrees, envCleanup, isEphemeral)
-	if len(cleanupErrors) > 0 {
-		s.logger.Warn(cleanupMsg+" with errors",
-			zap.String("task_id", id),
-			zap.Int("error_count", len(cleanupErrors)),
-			zap.Duration("duration", time.Since(cleanupStart)))
-		return
-	}
-	s.logger.Info(cleanupMsg,
-		zap.String("task_id", id),
-		zap.Duration("duration", time.Since(cleanupStart)))
-}
-
-func (s *Service) stopTaskCleanupTargets(
-	ctx context.Context,
-	taskID string,
-	stopTargets []taskStopTarget,
-	stopReason string,
-	stopFailMsg string,
-) {
-	for _, target := range stopTargets {
-		if target.executionID != "" {
-			if err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true); err != nil {
-				s.logger.Warn(stopFailMsg,
-					zap.String("task_id", taskID),
-					zap.String("session_id", target.sessionID),
-					zap.String("execution_id", target.executionID),
-					zap.Error(err))
-			}
-			continue
-		}
-		if err := s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true); err != nil {
-			s.logger.Warn(stopFailMsg,
-				zap.String("task_id", taskID),
-				zap.String("session_id", target.sessionID),
-				zap.Error(err))
-		}
-	}
 }
 
 func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSessions []*models.TaskSession) []taskStopTarget {

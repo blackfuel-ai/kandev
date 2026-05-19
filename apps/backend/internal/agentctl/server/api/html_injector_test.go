@@ -40,6 +40,18 @@ func TestInjectInspectorScript_UpperCaseBodyTag(t *testing.T) {
 	}
 }
 
+func TestInspectorScript_UsesPreviewRouteForAnnotationPagePath(t *testing.T) {
+	if !strings.Contains(inspectorScript, "function currentPagePath()") {
+		t.Fatal("inspector should derive annotation routes through currentPagePath")
+	}
+	if !strings.Contains(inspectorScript, "window.__kandevProxyPrefix") {
+		t.Fatal("inspector should read the proxy prefix exposed by the runtime shim")
+	}
+	if !strings.Contains(inspectorScript, "pagePath: currentPagePath()") {
+		t.Fatal("annotations should store the app route, not location.pathname directly")
+	}
+}
+
 func TestStripIframeSecurityHeaders_RemovesBlockingHeaders(t *testing.T) {
 	h := http.Header{}
 	h.Set("Content-Security-Policy", "default-src 'none'")

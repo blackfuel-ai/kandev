@@ -125,6 +125,17 @@
     pendingAnnotation = null;
   }
 
+  function currentPagePath() {
+    var path = location.pathname;
+    var prefix = window.__kandevProxyPrefix;
+    if (typeof prefix === 'string' && prefix) {
+      if (path === prefix || path.indexOf(prefix + '/') === 0) {
+        path = path.slice(prefix.length) || '/';
+      }
+    }
+    return path + location.search;
+  }
+
   function openCommentPopup(anchorX, anchorY, onSubmit) {
     closePopup();
     popup = document.createElement('div');
@@ -181,7 +192,7 @@
       elements: elements || null,
       markerX: markerX,
       markerY: markerY,
-      pagePath: location.pathname + location.search,
+      pagePath: currentPagePath(),
     };
     var popupX = Math.min(markerX + 14, window.innerWidth - 296);
     var popupY = Math.min(markerY + 14, window.innerHeight - 140);

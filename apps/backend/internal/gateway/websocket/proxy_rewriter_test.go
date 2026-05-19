@@ -225,6 +225,14 @@ func TestRuntimeShim_InstallsMutationObserver(t *testing.T) {
 	mustContain(t, shim, `if(a==='srcset')`)
 }
 
+func TestRuntimeShim_ExposesProxyPrefixToInspector(t *testing.T) {
+	shim := runtimeShim(proxyPrefix)
+
+	// The inspector script uses this to report app-local routes in annotation
+	// prompts instead of the gateway's /port-proxy/... path.
+	mustContain(t, shim, `window.__kandevProxyPrefix=P;`)
+}
+
 func TestRuntimeShim_ForwardsConsoleToParent(t *testing.T) {
 	shim := runtimeShim(proxyPrefix)
 

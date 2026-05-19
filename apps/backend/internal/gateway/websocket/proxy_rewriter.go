@@ -61,6 +61,7 @@ const headTagName = "head"
 // JS is still a single self-invoking expression with no internal whitespace.
 const runtimeShimTemplate = `<script>(function(){` +
 	`var P=%q;` +
+	`window.__kandevProxyPrefix=P;` +
 	// Path rewriter: prefix path-absolute URLs that aren't already prefixed.
 	`function r(u){if(typeof u!=='string')return u;if(!u||u.charAt(0)!=='/'||(u.length>1&&u.charAt(1)==='/'))return u;if(u.indexOf(P)===0)return u;return P+u;}` +
 	// fetch — string and Request-object input forms.
