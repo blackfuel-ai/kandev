@@ -145,8 +145,8 @@ func TestHandleAgentReady_PassthroughQueuedMessageDeliveredOnce(t *testing.T) {
 	}
 
 	require.Len(t, agentManager.passthroughStdinCalls, 2, "each queued message must be delivered exactly once")
-	require.Contains(t, agentManager.passthroughStdinCalls[0].Data, "peer report")
-	require.Contains(t, agentManager.passthroughStdinCalls[1].Data, "next report")
+	require.Equal(t, "peer report\r", agentManager.passthroughStdinCalls[0].Data)
+	require.Equal(t, "next report\r", agentManager.passthroughStdinCalls[1].Data)
 	for _, id := range []string{first.ID, second.ID} {
 		_, err = svc.messageQueue.FindEntryByID(ctx, id)
 		require.ErrorIs(t, err, messagequeue.ErrEntryNotFound)
